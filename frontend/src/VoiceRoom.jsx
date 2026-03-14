@@ -140,7 +140,7 @@ const SOUNDS = [
 ];
 
 const SOUND_MAP = Object.fromEntries(SOUNDS.map((s) => [s.key, s.file]));
-const SOUND_COOLDOWN_MS = 3000;
+const SOUND_COOLDOWN_MS = 60_000; // 1 minute per button
 
 function Soundboard({ displayName }) {
   // triggered: object keyed by sound key, true while flashing
