@@ -7,12 +7,85 @@ import gopGopGopSound from "./sounds/gopgopgop.mp3";
 import ohHellNahSound from "./sounds/oh-my-god-bro-oh-hell-nah-man.mp3";
 import {
   LiveKitRoom,
-  RoomAudioRenderer,
   useDataChannel,
   useLocalParticipant,
   useParticipants,
   useRoomContext,
 } from "@livekit/components-react";
+
+const DEFAULT_PARTICIPANT_GAIN = 1.5;
+const MIN_PARTICIPANT_GAIN = 0.5;
+const MAX_PARTICIPANT_GAIN = 3;
+
+const MIC_AUDIO_CONSTRAINTS = {
+  echoCancellation: true,
+  noiseSuppression: true,
+  autoGainControl: true,
+  sampleRate: 48000,
+};
+
+function clampGain(value) {
+  const numericValue = Number(value);
+  if (Number.isNaN(numericValue)) {
+    return DEFAULT_PARTICIPANT_GAIN;
+  }
+
+  return Math.min(
+    MAX_PARTICIPANT_GAIN,
+    Math.max(MIN_PARTICIPANT_GAIN, numericValue),
+  );
+}
+
+function getRemoteAudioTrack(participant) {
+  for (const publication of participant.audioTrackPublications.values()) {
+    if (publication.track && publication.isSubscribed) {
+      return publication.track;
+    }
+  }
+
+  return null;
+}
+
+function getOrCreateAudioContext(audioContextRef) {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  if (!audioContextRef.current) {
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContextClass) {
+      return null;
+    }
+    audioContextRef.current = new AudioContextClass();
+  }
+
+  if (audioContextRef.current.state === "suspended") {
+    audioContextRef.current.resume().catch(() => {});
+  }
+
+  return audioContextRef.current;
+}
+
+function disconnectParticipantAudio(audioNodesRef, identity) {
+  const audioNodes = audioNodesRef.current.get(identity);
+  if (!audioNodes) {
+    return;
+  }
+
+  try {
+    audioNodes.source.disconnect();
+  } catch {
+    // ignore disconnect errors for stale nodes
+  }
+
+  try {
+    audioNodes.gainNode.disconnect();
+  } catch {
+    // ignore disconnect errors for stale nodes
+  }
+
+  audioNodesRef.current.delete(identity);
+}
 
 function getInitials(name) {
   return (
@@ -133,7 +206,13 @@ function Soundboard({ displayName }) {
   );
 }
 
-function ParticipantCard({ participant, avatarUrl }) {
+function ParticipantCard({
+  participant,
+  avatarUrl,
+  showVolumeControl,
+  volume,
+  onVolumeChange,
+}) {
   const name = participant.name || participant.identity;
   const isMuted = !participant.isMicrophoneEnabled;
   const status = isMuted
@@ -168,6 +247,20 @@ function ParticipantCard({ participant, avatarUrl }) {
       </div>
       <p className="participant-name">{name}</p>
       <p className="participant-status">{status}</p>
+      {showVolumeControl ? (
+        <label className="participant-volume-control">
+          <span className="participant-volume-label">Volume</span>
+          <input
+            className="participant-volume-slider"
+            type="range"
+            min={MIN_PARTICIPANT_GAIN}
+            max={MAX_PARTICIPANT_GAIN}
+            step="0.1"
+            value={volume}
+            onChange={(event) => onVolumeChange(event.target.value)}
+          />
+        </label>
+      ) : null}
     </article>
   );
 }
@@ -178,7 +271,125 @@ function RoomLayout({ roomName, displayName, avatarUrl, onLeave }) {
   const { localParticipant, isMicrophoneEnabled } = useLocalParticipant();
   const [isTogglingMic, setIsTogglingMic] = useState(false);
   const [isLeaving, setIsLeaving] = useState(false);
+  const [participantGains, setParticipantGains] = useState({});
   const sessionTime = useSessionTimer();
+  const audioContextRef = useRef(null);
+  const audioNodesRef = useRef(new Map());
+  const gainValuesRef = useRef(new Map());
+
+  useEffect(() => {
+    const remoteParticipants = participants.filter(
+      (participant) => !participant.isLocal,
+    );
+    const activeIdentities = new Set(
+      remoteParticipants.map((participant) => participant.identity),
+    );
+    let hasChanges = false;
+
+    for (const participant of remoteParticipants) {
+      if (!gainValuesRef.current.has(participant.identity)) {
+        gainValuesRef.current.set(
+          participant.identity,
+          DEFAULT_PARTICIPANT_GAIN,
+        );
+        hasChanges = true;
+      }
+    }
+
+    for (const identity of Array.from(gainValuesRef.current.keys())) {
+      if (!activeIdentities.has(identity)) {
+        gainValuesRef.current.delete(identity);
+        hasChanges = true;
+      }
+    }
+
+    if (hasChanges) {
+      setParticipantGains(Object.fromEntries(gainValuesRef.current));
+    }
+  }, [participants]);
+
+  useEffect(() => {
+    const audioContext = getOrCreateAudioContext(audioContextRef);
+    const activeIdentities = new Set();
+
+    for (const participant of participants) {
+      if (participant.isLocal) {
+        continue;
+      }
+
+      const identity = participant.identity;
+      activeIdentities.add(identity);
+      const remoteTrack = getRemoteAudioTrack(participant);
+      const mediaStreamTrack = remoteTrack?.mediaStreamTrack;
+      if (!audioContext || !mediaStreamTrack) {
+        disconnectParticipantAudio(audioNodesRef, identity);
+        continue;
+      }
+
+      const trackKey = remoteTrack.sid || mediaStreamTrack.id;
+      const existingNodes = audioNodesRef.current.get(identity);
+      if (!existingNodes || existingNodes.trackKey !== trackKey) {
+        disconnectParticipantAudio(audioNodesRef, identity);
+
+        const stream = new MediaStream([mediaStreamTrack]);
+        const source = audioContext.createMediaStreamSource(stream);
+        const gainNode = audioContext.createGain();
+        gainNode.gain.value = clampGain(
+          gainValuesRef.current.get(identity) ?? DEFAULT_PARTICIPANT_GAIN,
+        );
+        source.connect(gainNode);
+        gainNode.connect(audioContext.destination);
+
+        audioNodesRef.current.set(identity, {
+          source,
+          gainNode,
+          trackKey,
+        });
+      }
+    }
+
+    for (const identity of Array.from(audioNodesRef.current.keys())) {
+      if (!activeIdentities.has(identity)) {
+        disconnectParticipantAudio(audioNodesRef, identity);
+      }
+    }
+  }, [participants]);
+
+  useEffect(() => {
+    for (const [identity, nodes] of audioNodesRef.current.entries()) {
+      const gainValue = clampGain(
+        gainValuesRef.current.get(identity) ?? DEFAULT_PARTICIPANT_GAIN,
+      );
+      nodes.gainNode.gain.value = gainValue;
+    }
+  }, [participantGains]);
+
+  useEffect(
+    () => () => {
+      for (const identity of Array.from(audioNodesRef.current.keys())) {
+        disconnectParticipantAudio(audioNodesRef, identity);
+      }
+      audioContextRef.current?.close().catch(() => {});
+    },
+    [],
+  );
+
+  const handleParticipantGainChange = (identity, rawValue) => {
+    const gainValue = clampGain(rawValue);
+    gainValuesRef.current.set(identity, gainValue);
+    setParticipantGains((previous) => ({
+      ...previous,
+      [identity]: gainValue,
+    }));
+
+    const participantAudioNodes = audioNodesRef.current.get(identity);
+    if (participantAudioNodes) {
+      participantAudioNodes.gainNode.gain.value = gainValue;
+    }
+
+    const audioContext = getOrCreateAudioContext(audioContextRef);
+    audioContext?.resume().catch(() => {});
+  };
 
   const toggleMute = async () => {
     if (!localParticipant || isTogglingMic) {
@@ -225,6 +436,13 @@ function RoomLayout({ roomName, displayName, avatarUrl, onLeave }) {
             key={participant.identity}
             participant={participant}
             avatarUrl={participant.isLocal ? avatarUrl : null}
+            showVolumeControl={!participant.isLocal}
+            volume={
+              participantGains[participant.identity] ?? DEFAULT_PARTICIPANT_GAIN
+            }
+            onVolumeChange={(value) =>
+              handleParticipantGainChange(participant.identity, value)
+            }
           />
         ))}
       </div>
@@ -248,8 +466,6 @@ function RoomLayout({ roomName, displayName, avatarUrl, onLeave }) {
           LEAVE
         </button>
       </footer>
-
-      <RoomAudioRenderer />
     </section>
   );
 }
@@ -267,7 +483,7 @@ function VoiceRoom({
       token={token}
       serverUrl={serverUrl}
       connect={true}
-      audio={true}
+      audio={MIC_AUDIO_CONSTRAINTS}
       video={false}
       onDisconnected={onLeave}
       className="livekit-shell"
