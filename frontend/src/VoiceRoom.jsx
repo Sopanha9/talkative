@@ -12,6 +12,7 @@ import {
   useParticipants,
   useRoomContext,
 } from "@livekit/components-react";
+import { useKrispNoiseFilter } from "@livekit/components-react/krisp";
 import { Track } from "livekit-client";
 
 const DEFAULT_PARTICIPANT_GAIN = 1.5;
@@ -151,10 +152,12 @@ function Soundboard({ displayName }) {
 
   // Keep a stable ref so the data-channel callback always calls the latest flash
   const flashRef = useRef(null);
-  flashRef.current = (key) => {
-    setTriggered((prev) => ({ ...prev, [key]: true }));
-    setTimeout(() => setTriggered((prev) => ({ ...prev, [key]: false })), 500);
-  };
+  useEffect(() => {
+    flashRef.current = (key) => {
+      setTriggered((prev) => ({ ...prev, [key]: true }));
+      setTimeout(() => setTriggered((prev) => ({ ...prev, [key]: false })), 500);
+    };
+  }, []);
 
   const { send } = useDataChannel("soundboard", (msg) => {
     try {
@@ -259,7 +262,6 @@ function ScreenShareView({ participant, track, isLocal, onStopSharing }) {
           </button>
         ) : null}
       </div>
-      {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
       <video
         ref={videoRef}
         className="screen-share-video"
@@ -350,6 +352,7 @@ function RoomLayout({ roomName, displayName, avatarUrl, onLeave }) {
   const [participantGains, setParticipantGains] = useState({});
   const [isScreenSharing, setIsScreenSharing] = useState(false);
   const [isTogglingScreenShare, setIsTogglingScreenShare] = useState(false);
+  const { isNoiseFilterEnabled, setNoiseFilterEnabled, isNoiseFilterPending } = useKrispNoiseFilter();
   const sessionTime = useSessionTimer();
   const audioContextRef = useRef(null);
   const audioNodesRef = useRef(new Map());
@@ -573,6 +576,14 @@ function RoomLayout({ roomName, displayName, avatarUrl, onLeave }) {
 
       <footer className="control-bar" aria-label="Room controls">
         <span className="session-timer-bar">{sessionTime}</span>
+        <button
+          className={`control-btn ${isNoiseFilterEnabled ? "is-sharing" : ""}`}
+          onClick={() => setNoiseFilterEnabled(!isNoiseFilterEnabled)}
+          disabled={isNoiseFilterPending || !isMicrophoneEnabled}
+          title={isNoiseFilterEnabled ? "Turn off AI Noise Filter" : "Turn on AI Noise Filter"}
+        >
+          {isNoiseFilterEnabled ? "AI NOISE ON" : "AI NOISE OFF"}
+        </button>
         <button
           className={`control-btn ${isMicrophoneEnabled ? "" : "is-muted-toggle"}`}
           onClick={toggleMute}
