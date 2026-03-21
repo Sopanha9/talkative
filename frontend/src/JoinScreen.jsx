@@ -1,8 +1,14 @@
 import { useRef, useState } from "react";
+import cat1 from "./randomPf/cat1.png";
+import cat2 from "./randomPf/cat2.png";
+import cathief from "./randomPf/cathief.png";
+import panda from "./randomPf/panda.png";
+
+const defaultAvatars = [cat1, cat2, cathief, panda];
 
 function JoinScreen({ onJoin, isJoining, error }) {
   const [displayName, setDisplayName] = useState("");
-  const [avatarUrl, setAvatarUrl] = useState(null);
+  const [avatarUrl, setAvatarUrl] = useState(() => defaultAvatars[Math.floor(Math.random() * defaultAvatars.length)]);
   const fileInputRef = useRef(null);
 
   const handleFileChange = (event) => {
