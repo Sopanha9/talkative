@@ -12,6 +12,7 @@ import {
   useParticipants,
   useRoomContext,
 } from "@livekit/components-react";
+import { Track } from "livekit-client";
 
 const DEFAULT_PARTICIPANT_GAIN = 1.5;
 const MIN_PARTICIPANT_GAIN = 0.5;
@@ -206,12 +207,77 @@ function Soundboard({ displayName }) {
   );
 }
 
+function getScreenShareTrack(participant) {
+  for (const publication of participant.videoTrackPublications.values()) {
+    if (
+      publication.source === Track.Source.ScreenShare &&
+      publication.track &&
+      publication.isSubscribed !== false
+    ) {
+      return publication.track;
+    }
+  }
+  return null;
+}
+
+function ScreenShareView({ participant, track, isLocal, onStopSharing }) {
+  const videoRef = useRef(null);
+  const name = participant.name || participant.identity;
+
+  useEffect(() => {
+    const videoEl = videoRef.current;
+    if (!videoEl || !track?.mediaStreamTrack) return;
+
+    const stream = new MediaStream([track.mediaStreamTrack]);
+    videoEl.srcObject = stream;
+    videoEl.play().catch(() => {});
+
+    return () => {
+      videoEl.srcObject = null;
+    };
+  }, [track]);
+
+  return (
+    <div className="screen-share-panel">
+      <div className="screen-share-header">
+        <span className="screen-share-label">
+          <svg
+            viewBox="0 0 24 24"
+            aria-hidden="true"
+            className="screen-share-icon"
+          >
+            <path d="M20 3H4a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h7v2H8a1 1 0 0 0 0 2h8a1 1 0 0 0 0-2h-3v-2h7a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2Zm0 13H4V5h16v11Z" />
+          </svg>
+          {name} is sharing their screen
+        </span>
+        {isLocal ? (
+          <button
+            className="control-btn screen-share-stop-btn"
+            onClick={onStopSharing}
+          >
+            STOP SHARING
+          </button>
+        ) : null}
+      </div>
+      {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
+      <video
+        ref={videoRef}
+        className="screen-share-video"
+        autoPlay
+        playsInline
+        muted
+      />
+    </div>
+  );
+}
+
 function ParticipantCard({
   participant,
   avatarUrl,
   showVolumeControl,
   volume,
   onVolumeChange,
+  isScreenSharing,
 }) {
   const name = participant.name || participant.identity;
   const isMuted = !participant.isMicrophoneEnabled;
@@ -244,6 +310,16 @@ function ParticipantCard({
             </svg>
           </span>
         ) : null}
+        {isScreenSharing ? (
+          <span
+            className="screen-share-badge"
+            aria-label={`${name} is sharing screen`}
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M20 3H4a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h7v2H8a1 1 0 0 0 0 2h8a1 1 0 0 0 0-2h-3v-2h7a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2Zm0 13H4V5h16v11Z" />
+            </svg>
+          </span>
+        ) : null}
       </div>
       <p className="participant-name">{name}</p>
       <p className="participant-status">{status}</p>
@@ -272,10 +348,31 @@ function RoomLayout({ roomName, displayName, avatarUrl, onLeave }) {
   const [isTogglingMic, setIsTogglingMic] = useState(false);
   const [isLeaving, setIsLeaving] = useState(false);
   const [participantGains, setParticipantGains] = useState({});
+  const [isScreenSharing, setIsScreenSharing] = useState(false);
+  const [isTogglingScreenShare, setIsTogglingScreenShare] = useState(false);
   const sessionTime = useSessionTimer();
   const audioContextRef = useRef(null);
   const audioNodesRef = useRef(new Map());
   const gainValuesRef = useRef(new Map());
+
+  // Derive active screen share from any participant
+  const activeScreenShare = (() => {
+    for (const participant of participants) {
+      const track = getScreenShareTrack(participant);
+      if (track) {
+        return { participant, track };
+      }
+    }
+    return null;
+  })();
+
+  // Keep isScreenSharing in sync with local participant's actual track state
+  useEffect(() => {
+    const localScreenShareTrack = localParticipant
+      ? getScreenShareTrack(localParticipant)
+      : null;
+    setIsScreenSharing(!!localScreenShareTrack);
+  }, [participants, localParticipant]);
 
   useEffect(() => {
     const remoteParticipants = participants.filter(
@@ -404,6 +501,21 @@ function RoomLayout({ roomName, displayName, avatarUrl, onLeave }) {
     }
   };
 
+  const toggleScreenShare = async () => {
+    if (!localParticipant || isTogglingScreenShare) {
+      return;
+    }
+
+    setIsTogglingScreenShare(true);
+    try {
+      await localParticipant.setScreenShareEnabled(!isScreenSharing);
+    } catch {
+      // User cancelled the OS screen picker or permission denied — ignore
+    } finally {
+      setIsTogglingScreenShare(false);
+    }
+  };
+
   const leaveRoom = async () => {
     if (isLeaving) {
       return;
@@ -430,6 +542,15 @@ function RoomLayout({ roomName, displayName, avatarUrl, onLeave }) {
         <p className="you-tag">CALLSIGN: {displayName}</p>
       </header>
 
+      {activeScreenShare ? (
+        <ScreenShareView
+          participant={activeScreenShare.participant}
+          track={activeScreenShare.track}
+          isLocal={activeScreenShare.participant.isLocal}
+          onStopSharing={toggleScreenShare}
+        />
+      ) : null}
+
       <div className="participants-grid">
         {participants.map((participant) => (
           <ParticipantCard
@@ -443,6 +564,7 @@ function RoomLayout({ roomName, displayName, avatarUrl, onLeave }) {
             onVolumeChange={(value) =>
               handleParticipantGainChange(participant.identity, value)
             }
+            isScreenSharing={!!getScreenShareTrack(participant)}
           />
         ))}
       </div>
@@ -457,6 +579,16 @@ function RoomLayout({ roomName, displayName, avatarUrl, onLeave }) {
           disabled={isTogglingMic}
         >
           {isMicrophoneEnabled ? "MUTE MIC" : "UNMUTE MIC"}
+        </button>
+        <button
+          className={`control-btn ${isScreenSharing ? "is-sharing" : ""}`}
+          onClick={toggleScreenShare}
+          disabled={isTogglingScreenShare}
+          title={
+            isScreenSharing ? "Stop sharing your screen" : "Share your screen"
+          }
+        >
+          {isScreenSharing ? "STOP SHARING" : "SHARE SCREEN"}
         </button>
         <button
           className="control-btn leave-btn"

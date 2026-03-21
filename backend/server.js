@@ -1,7 +1,7 @@
 const express = require("express");
 const cors = require("cors");
 const dotenv = require("dotenv");
-const { AccessToken } = require("livekit-server-sdk");
+const { AccessToken, TrackSource } = require("livekit-server-sdk");
 
 dotenv.config();
 
@@ -42,6 +42,12 @@ app.get("/token", async (req, res) => {
       room: ROOM_NAME,
       canPublish: true,
       canSubscribe: true,
+      canPublishSources: [
+        TrackSource.CAMERA,
+        TrackSource.MICROPHONE,
+        TrackSource.SCREEN_SHARE,
+        TrackSource.SCREEN_SHARE_AUDIO,
+      ],
     });
 
     const jwt = await token.toJwt();
