@@ -10,8 +10,16 @@ const defaultAvatars = [cat1, cat2, cathief, panda];
 function JoinScreen() {
   const { loginWithGoogle, loginUser, registerUser, loading, error } =
     useAuth();
+  const desktopDownloadUrl =
+    import.meta.env.VITE_DESKTOP_DOWNLOAD_URL ||
+    "https://github.com/Sopanha9/talkative/releases";
+  const isTauriDesktop =
+    typeof window !== "undefined" &&
+    (window.location.protocol === "tauri:" ||
+      window.navigator.userAgent.includes("Tauri"));
 
   const [authMode, setAuthMode] = useState("login");
+  const [showDesktopGuide, setShowDesktopGuide] = useState(false);
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -93,6 +101,56 @@ function JoinScreen() {
             ? "Continue with Google or use your credentials."
             : "Sign up with Google or create an account with email."}
         </p>
+
+        <div className="desktop-guide">
+          <button
+            type="button"
+            className="desktop-guide-toggle"
+            onClick={() => setShowDesktopGuide((prev) => !prev)}
+            aria-expanded={showDesktopGuide}
+            aria-controls="desktop-guide-panel"
+          >
+            {showDesktopGuide
+              ? "Hide Desktop App Instructions"
+              : "Using Talkitive on Desktop?"}
+          </button>
+
+          {showDesktopGuide ? (
+            <div id="desktop-guide-panel" className="desktop-guide-panel">
+              <p className="desktop-guide-status">
+                {isTauriDesktop
+                  ? "You are running the desktop app."
+                  : "You are using the browser version."}
+              </p>
+
+              {isTauriDesktop ? (
+                <p className="desktop-guide-text">
+                  Desktop mode is active. You can continue with Google or email
+                  login from this screen.
+                </p>
+              ) : (
+                <>
+                  <p className="desktop-guide-text">
+                    To install desktop builds for Windows, macOS, or Linux:
+                  </p>
+                  <ol className="desktop-guide-list">
+                    <li>Open the Talkitive Releases page.</li>
+                    <li>Download the package for your OS.</li>
+                    <li>Install it and launch the Talkitive desktop app.</li>
+                  </ol>
+                  <a
+                    className="desktop-guide-link"
+                    href={desktopDownloadUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Open Desktop Downloads
+                  </a>
+                </>
+              )}
+            </div>
+          ) : null}
+        </div>
 
         <button
           className="join-button main-btn oauth-btn"

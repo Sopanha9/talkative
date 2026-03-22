@@ -7,11 +7,15 @@
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "tauri": "tauri",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build"
   },
   "dependencies": {
     "@livekit/components-react": "^2.9.20",
     "@livekit/krisp-noise-filter": "^0.3.4",
+    "@tauri-apps/plugin-deep-link": "^2.4.7",
     "appwrite": "^23.0.0",
     "livekit-client": "^2.17.3",
     "react": "^19.2.4",
@@ -19,6 +23,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.39.4",
+    "@tauri-apps/cli": "^2.10.1",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.0",

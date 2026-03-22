@@ -3,6 +3,39 @@ import { account } from "./appwrite";
 import { ID } from "appwrite";
 
 const AuthContext = createContext();
+const APPWRITE_PROJECT_ID = "69bfacdf00058015ce11";
+const APPWRITE_CALLBACK_SCHEME = `appwrite-callback-${APPWRITE_PROJECT_ID}`;
+
+function getAuthStatusFromUrl(urlString) {
+  try {
+    const url = new URL(urlString);
+    if (url.searchParams.get("auth") === "oauth-failed") {
+      return {
+        status: "oauth-failed",
+        message:
+          url.searchParams.get("error_description") ||
+          url.searchParams.get("error") ||
+          url.searchParams.get("message") ||
+          "Google sign-in failed. Please try again.",
+      };
+    }
+
+    if (url.searchParams.get("auth") === "oauth-success") {
+      return { status: "oauth-success", message: null };
+    }
+
+    if (url.protocol.replace(":", "") === APPWRITE_CALLBACK_SCHEME) {
+      if (url.hostname.includes("failed")) {
+        return { status: "oauth-failed", message: "Google sign-in failed." };
+      }
+      return { status: "oauth-success", message: null };
+    }
+  } catch {
+    return { status: null, message: null };
+  }
+
+  return { status: null, message: null };
+}
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
@@ -10,19 +43,57 @@ export function AuthProvider({ children }) {
   const [error, setError] = useState(null);
 
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const authStatus = params.get("auth");
-    const oauthError =
-      params.get("error_description") ||
-      params.get("error") ||
-      params.get("message");
+    const isTauriDesktop = window.location.protocol === "tauri:";
+    const { status: initialStatus, message: initialMessage } =
+      getAuthStatusFromUrl(window.location.href);
 
-    if (authStatus === "oauth-failed") {
-      setError(oauthError || "Google sign-in failed. Please try again.");
+    if (initialStatus === "oauth-failed") {
+      setError(initialMessage || "Google sign-in failed. Please try again.");
       window.history.replaceState({}, document.title, window.location.pathname);
     }
 
-    checkSession(authStatus);
+    checkSession(initialStatus);
+
+    if (!isTauriDesktop) {
+      return;
+    }
+
+    let unlisten;
+
+    const setupDeepLinkListener = async () => {
+      try {
+        const { onOpenUrl } = await import("@tauri-apps/plugin-deep-link");
+        unlisten = await onOpenUrl((urls) => {
+          const callbackUrl = urls.find((url) =>
+            url.startsWith(`${APPWRITE_CALLBACK_SCHEME}://`),
+          );
+
+          if (!callbackUrl) {
+            return;
+          }
+
+          const { status, message } = getAuthStatusFromUrl(callbackUrl);
+          if (status === "oauth-failed") {
+            setError(message || "Google sign-in failed. Please try again.");
+            setLoading(false);
+            return;
+          }
+
+          setLoading(true);
+          checkSession("oauth-success");
+        });
+      } catch (err) {
+        console.error("Deep-link setup error:", err);
+      }
+    };
+
+    setupDeepLinkListener();
+
+    return () => {
+      if (typeof unlisten === "function") {
+        unlisten();
+      }
+    };
   }, []);
 
   const checkSession = async (authStatus = null) => {
@@ -57,9 +128,14 @@ export function AuthProvider({ children }) {
     try {
       setLoading(true);
       setError(null);
+      const isTauriDesktop = window.location.protocol === "tauri:";
       const origin = window.location.origin;
-      const successUrl = `${origin}/?auth=oauth-success`;
-      const failureUrl = `${origin}/?auth=oauth-failed`;
+      const successUrl = isTauriDesktop
+        ? `${APPWRITE_CALLBACK_SCHEME}://oauth-success?auth=oauth-success`
+        : `${origin}/?auth=oauth-success`;
+      const failureUrl = isTauriDesktop
+        ? `${APPWRITE_CALLBACK_SCHEME}://oauth-failed?auth=oauth-failed`
+        : `${origin}/?auth=oauth-failed`;
       await account.createOAuth2Session("google", successUrl, failureUrl);
     } catch (err) {
       console.error("OAuth login error:", err);
