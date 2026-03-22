@@ -12,6 +12,7 @@
   "dependencies": {
     "@livekit/components-react": "^2.9.20",
     "@livekit/krisp-noise-filter": "^0.3.4",
+    "appwrite": "^23.0.0",
     "livekit-client": "^2.17.3",
     "react": "^19.2.4",
     "react-dom": "^19.2.4"

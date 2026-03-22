@@ -31,6 +31,11 @@ app.get("/token", async (req, res) => {
     });
   }
 
+  // Use the requested room name from the query param; fall back to the default
+  const rawRoom = req.query.room;
+  const room =
+    typeof rawRoom === "string" && rawRoom.trim() ? rawRoom.trim() : ROOM_NAME;
+
   try {
     const token = new AccessToken(LIVEKIT_API_KEY, LIVEKIT_API_SECRET, {
       identity: name,
@@ -39,7 +44,7 @@ app.get("/token", async (req, res) => {
 
     token.addGrant({
       roomJoin: true,
-      room: ROOM_NAME,
+      room: room,
       canPublish: true,
       canSubscribe: true,
       canPublishSources: [
@@ -54,7 +59,7 @@ app.get("/token", async (req, res) => {
 
     return res.json({
       token: jwt,
-      room: ROOM_NAME,
+      room: room,
       livekitUrl: LIVEKIT_URL,
     });
   } catch (error) {
