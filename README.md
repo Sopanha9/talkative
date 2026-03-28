@@ -1,4 +1,4 @@
-# Talkitive
+# Talkitive  ( no longer maintained )
 
 A real-time audio-only voice chat app built with **Vite + React** and **LiveKit**.
 
